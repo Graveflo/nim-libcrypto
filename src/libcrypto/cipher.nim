@@ -102,15 +102,11 @@ proc reuseCipher*[T, M](
 ): CipherPack[T, mode] =
   reuseCipher(pack, mode, key, nil)
 
-proc reuseCipher*[V: MemoryView, T, M](
-    pack: CipherPack[T, M], mode: static CipherMode, key: V
-): CipherPack[T, mode] =
-  reuseCipher(pack, mode, key[0].addr, nil)
-
 proc `=destroy`*[T, K](x: CipherPack[T, K]) =
   if x.cipher != nil:
     EVP_CIPHER_free(x.cipher)
   if x.ctx != nil:
+    discard EVP_CIPHER_CTX_cleanup(x.ctx)
     EVP_CIPHER_CTX_free(x.ctx)
 
 proc `=copy`*[T, K](y: var CipherPack[T, K], x: CipherPack[T, K]) =

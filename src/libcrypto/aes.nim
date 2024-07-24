@@ -26,31 +26,16 @@ proc new*(
   result.cipher = EVP_aes_128_cbc()
   newCommon(result, key, iv)
 
-proc new*(
-    t: typedesc[Aes128Ecb], mode: static CipherMode, key: ptr [array[32, byte]]
-): CipherPack[Aes128Ecb, mode] =
-  result.cipher = EVP_aes_128_ecb()
-  newCommon(result, key, nil)
-
-proc new*(
-    t: typedesc[Aes128Ecb], mode: static CipherMode, key: Resizeable and MemoryView
-): CipherPack[Aes128Ecb, mode] =
+template safePointerResizable(key: auto, size: static int) {.dirty.} =
   var ks: pointer
-  when not defined(danger):
-    if key.len != 16:
-      var nk = key
-      nk.setLen(16)
-      ks = nk[0].addr
-    else:
-      ks = key[0].addr
+  if key.len != size:
+    var nk = key
+    nk.setLen(size)
+    ks = nk[0].addr
   else:
     ks = key[0].addr
-  result.cipher = EVP_aes_128_ecb()
-  newCommon(result, ks, nil)
 
-proc new*(
-    t: typedesc[Aes128Ecb], mode: static CipherMode, key: openArray[byte | char]
-): CipherPack[Aes128Ecb, mode] =
+template maybeSafePointerOpenArray(key: auto, size: static int) {.dirty.} =
   var ks: pointer
   when not defined(danger):
     if key.len != 16:
@@ -62,5 +47,58 @@ proc new*(
       ks = key[0].addr
   else:
     ks = key[0].addr
-  result.cipher = EVP_aes_128_ecb()
-  newCommon(result, ks, nil)
+
+template liftBasicCipher(cipherType: untyped, keySize: static int) =
+  proc new*(
+      t: typedesc[cipherType], mode: static CipherMode, key: ptr [array[keySize, byte]]
+  ): CipherPack[cipherType, mode] =
+    result.cipher = EVP_aes_128_ecb()
+    newCommon(result, key, nil)
+
+  proc new*(
+      t: typedesc[cipherType], mode: static CipherMode, key: Resizeable and MemoryView
+  ): CipherPack[cipherType, mode] =
+    safePointerResizable(key, keySize)
+    result.cipher = EVP_aes_128_ecb()
+    newCommon(result, ks, nil)
+
+  proc new*(
+      t: typedesc[cipherType], mode: static CipherMode, key: openArray[byte | char]
+  ): CipherPack[cipherType, mode] =
+    maybeSafePointerOpenArray(key, keySize)
+    result.cipher = EVP_aes_128_ecb()
+    newCommon(result, ks, nil)
+
+  proc rinse*[T](pack: var CipherPack[T, cipherType], key: Resizeable and MemoryView) =
+    safePointerResizable(key, keySize)
+    orPanick:
+      pack.ctx.EVP_CIPHER_CTX_cleanup()
+    orPanick:
+      pack.ctx.EVP_CIPHER_CTX_free()
+    newCommon(pack, ks, nil)
+
+  proc rinse*[T](pack: var CipherPack[T, cipherType], key: openArray[byte | char]) =
+    maybeSafePointerOpenArray(key, keySize)
+    orPanick:
+      pack.ctx.EVP_CIPHER_CTX_cleanup()
+    orPanick:
+      pack.ctx.EVP_CIPHER_CTX_free()
+    newCommon(pack, ks, nil)
+
+  proc reuseCipher*[V: MemoryView, T, M](
+      pack: CipherPack[cipherType, M],
+      mode: static CipherMode,
+      key: Resizeable and MemoryView,
+  ): CipherPack[cipherType, mode] =
+    safePointerResizable(key, 16)
+    reuseCipher(pack, mode, ks, nil)
+
+  proc reuseCipher*[V: MemoryView, T, M](
+      pack: CipherPack[cipherType, M],
+      mode: static CipherMode,
+      key: openArray[byte | char],
+  ): CipherPack[cipherType, mode] =
+    maybeSafePointerOpenArray(key, keySize)
+    reuseCipher(pack, mode, ks, nil)
+
+liftBasicCipher(Aes128Ecb, 16)
