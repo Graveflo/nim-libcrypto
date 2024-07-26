@@ -25,3 +25,4 @@ packages
 build/**
 nim.cfg
 config.nims
+tests/tmp.nim
