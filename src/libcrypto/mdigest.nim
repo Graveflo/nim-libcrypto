@@ -103,6 +103,6 @@ proc `=dup`*[T](x: DigestPack[T]): DigestPack[T] =
   if x.ctx != nil:
     result.ctx = EVP_MD_CTX_dup(x.ctx)
 
-proc `=wasMoved`*[T](x: var DigestPack[T]) =
+proc `=wasMoved`*[T](x: var DigestPack[T]) {.noSideEffect.} =
   x.ctx = nil
   x.md = nil

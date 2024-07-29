@@ -12,6 +12,19 @@ type
   Resizeable* =
     concept x
         x.setLen(1)
+  OpenArrayLike* =
+    concept x
+        toOpenArray(x, 0, len(x)) is openArray
+  BoundedIndexable =
+    concept x, y
+        x[0]
+        x[0] = y
+        x[0 .. 0] = y[0 .. 0]
+        len(x) is Natural
+        BoundedIndexable(x[0 .. 0])
+
+proc contCopy*(dest, src: OpenArrayLike) =
+  dest[0 ..< len(src)] = src[0 ..< len(src)]
 
 const HexChars = "0123456789ABCDEF"
 proc toHex*[T](v: ptr UncheckedArray[T], len: int): string =
@@ -26,10 +39,6 @@ proc toHex*[T](v: ptr UncheckedArray[T], len: int): string =
 
 proc toHex*[T](v: openArray[T]): string =
   toHex(cast[ptr UncheckedArray[T]](v.addr), v.len)
-
-type OpenArrayLike* =
-  concept x
-      toOpenArray(x, 0, len(x)) is openArray
 
 template toOpenArray*(s: OpenArrayLike): untyped =
   toOpenArray(s, 0, s.len - 1)

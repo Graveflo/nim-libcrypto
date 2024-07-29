@@ -1,4 +1,4 @@
-import std/[streams, typetraits, strformat]
+import std/[typetraits, strformat]
 import faststreams/[buffers, inputs, outputs]
 import support, evp
 
@@ -16,6 +16,10 @@ type
     Encrypt
     Decrypt
 
+  CipherModeType[T: static CipherMode] =
+    concept x
+        x == T
+
   CipherPack*[T: EvpCipherSub, M: static CipherMode] = object
     cipher*: EvpCipher
     ctx*: EvpCipherContext
@@ -32,7 +36,7 @@ proc EVP_CIPHER_CTX_dup*(
 
 proc EVP_CIPHER_CTX_cleanup*(
   ctx: EvpCipherContext
-) {.importc, header: "<openssl/evp.h>".}
+): cint {.importc, header: "<openssl/evp.h>".}
 
 proc EVP_CIPHER_up_ref*(ctx: EvpCipher): cint {.importc, header: "<openssl/evp.h>".}
 proc EVP_CIPHER_free*(ctx: EvpCipher) {.importc, header: "<openssl/evp.h>".}
@@ -170,7 +174,7 @@ proc basicDecrypt*[T: EvpCipherSub](
 
 proc genPipe(
     pack: var CipherPack,
-    buffer: openArray[byte],
+    buffer: var openArray[byte],
     src: InputStream,
     dest: OutputStream,
     update:
@@ -179,19 +183,15 @@ proc genPipe(
     preBuf: static int,
 ) =
   #[
-    this gets around openArray's unwillingness to give its addr
-
     preBuf is some space at the begining of the buffer for the cipher
     to use. Pretty dangerous becuase some algos trample the buffer. This seems to work for me though.
     A cipher block of space seems like a reasonable inner buffer, even though in-place
     updates are not always supported
   ]#
   var sz = 0.cint
-  let ba = buffer[0].addr
-  var ra = cast[ptr UncheckedArray[byte]](ba)
-  sz = src.readIntoEx(ra.toOpenArray(preBuf, buffer.len - 1)).cint
+  sz = src.readIntoEx(buffer.toOpenArray(preBuf, buffer.len - 1)).cint
   orPanick:
-    pack.ctx.update(ra, sz.addr, buffer[preBuf].addr, sz)
+    pack.ctx.update(buffer[0].addr, sz.addr, buffer[preBuf].addr, sz)
   dest.advance(sz)
   if not src.readable:
     orPanick:
@@ -217,12 +217,12 @@ proc generalCheckPipe(pack: var CipherPack, src: InputStream, dest: OutputStream
     )
 
 template liftInPlaceCipherPipe(cypherType: untyped, blockSize: static int): untyped =
-  bind genPipe
-
-  proc pipe*[T: cypherType](
-      pack: sink CipherPack[T, Encrypt], src: InputStream, dest: OutputStream
+  proc pipe*[T: CipherPack[cypherType, Encrypt]](
+      pack: sink T, src: InputStream, dest: OutputStream
   ) {.gcsafe, raises: [Defect, Exception, CatchableError].} =
-    # these methods seem to re-use pages effeciently. nice!
+    # work around
+    ensureRunway(dest, dest.buffers.pageSize)
+    ##
     generalCheckPipe(pack, src, dest)
     {.cast(gcsafe).}:
       while src.readable:
@@ -237,9 +237,12 @@ template liftInPlaceCipherPipe(cypherType: untyped, blockSize: static int): unty
         )
         dest.flush()
 
-  proc pipe*[T: cypherType](
-      pack: sink CipherPack[T, Decrypt], src: InputStream, dest: OutputStream
+  proc pipe*[T: CipherPack[cypherType, Decrypt]](
+      pack: sink T, src: InputStream, dest: OutputStream
   ) {.gcsafe, raises: [Defect, Exception, CatchableError].} =
+    # work around
+    ensureRunway(dest, dest.buffers.pageSize)
+    ##
     generalCheckPipe(pack, src, dest)
     {.cast(gcsafe).}:
       while src.readable:

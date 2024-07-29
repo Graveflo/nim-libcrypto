@@ -18,10 +18,28 @@ import libcrypto/[support, aes]
 let key = "verysecure"
 var encCipher = Aes128Ecb.new(Encrypt, key)
 echo encCipher.basicEncrypt("hello world").toHex
-encCipher.rinse()  # loads a new context
-encCipher.pipe(memoryInput("hello world"), fileOutput(stdout, pageSize=256))
+encCipher.rinse(key) # loads a new context
 
+# integration with faststreams
+let outp = memoryOutput(pageSize = 256)
+encCipher.pipe(memoryInput("hello world"), outp)
+echo outp.getOutput(string).toHex
+
+# move semantics on cipher duplicates context if used
+# after a finalizing operation
+echo encCipher.basicEncrypt("hello world").toHex
+
+# simple SHA digest
+import libcrypto/sha
+echo sha256.digest("foo")
+
+# similar move semantics to ciphers
+var messageDigest = newDigest(Sha512)
+messageDigest.update("foo")
+echo messageDigest.digest().toHex
+var mdCopy = messageDigest
+messageDigest.update("bar")
+echo messageDigest.digest().toHex
+mdCopy.update("bar")
+echo mdCopy.digest().toHex
 ```
-
-
-Ciphers and message digest objects have value semantics, so if you make ARC perform a copy you will get a copy of the context aswell. This can be useful

@@ -26,11 +26,13 @@ proc new*(
   result.cipher = EVP_aes_128_cbc()
   newCommon(result, key, iv)
 
+# WARNING: these dangle the pointer unfortunetly. dirty templates and inject wont work either
+
 template safePointerResizable(key: auto, size: static int) {.dirty.} =
   var ks: pointer
   if key.len != size:
-    var nk = key
-    nk.setLen(size)
+    var nk = newString(size)
+    nk[0 ..< len(key)] = key[0 ..< len(key)]
     ks = nk[0].addr
   else:
     ks = key[0].addr
@@ -58,6 +60,7 @@ template liftBasicCipher(cipherType: untyped, keySize: static int) =
   proc new*(
       t: typedesc[cipherType], mode: static CipherMode, key: Resizeable and MemoryView
   ): CipherPack[cipherType, mode] =
+    mixin ks
     safePointerResizable(key, keySize)
     result.cipher = EVP_aes_128_ecb()
     newCommon(result, ks, nil)
@@ -65,19 +68,21 @@ template liftBasicCipher(cipherType: untyped, keySize: static int) =
   proc new*(
       t: typedesc[cipherType], mode: static CipherMode, key: openArray[byte | char]
   ): CipherPack[cipherType, mode] =
+    mixin ks
     maybeSafePointerOpenArray(key, keySize)
     result.cipher = EVP_aes_128_ecb()
     newCommon(result, ks, nil)
 
-  proc rinse*[T](pack: var CipherPack[T, cipherType], key: Resizeable and MemoryView) =
+  proc rinse*[T](pack: var CipherPack[cipherType, T], key: Resizeable and MemoryView) =
+    mixin ks
     safePointerResizable(key, keySize)
     orPanick:
       pack.ctx.EVP_CIPHER_CTX_cleanup()
-    orPanick:
-      pack.ctx.EVP_CIPHER_CTX_free()
+    pack.ctx.EVP_CIPHER_CTX_free()
     newCommon(pack, ks, nil)
 
-  proc rinse*[T](pack: var CipherPack[T, cipherType], key: openArray[byte | char]) =
+  proc rinse*[T](pack: var CipherPack[cipherType, T], key: openArray[byte | char]) =
+    mixin ks
     maybeSafePointerOpenArray(key, keySize)
     orPanick:
       pack.ctx.EVP_CIPHER_CTX_cleanup()
@@ -85,19 +90,21 @@ template liftBasicCipher(cipherType: untyped, keySize: static int) =
       pack.ctx.EVP_CIPHER_CTX_free()
     newCommon(pack, ks, nil)
 
-  proc reuseCipher*[V: MemoryView, T, M](
+  proc reuseCipher*[M](
       pack: CipherPack[cipherType, M],
       mode: static CipherMode,
       key: Resizeable and MemoryView,
   ): CipherPack[cipherType, mode] =
+    mixin ks
     safePointerResizable(key, 16)
     reuseCipher(pack, mode, ks, nil)
 
-  proc reuseCipher*[V: MemoryView, T, M](
+  proc reuseCipher*[M](
       pack: CipherPack[cipherType, M],
       mode: static CipherMode,
       key: openArray[byte | char],
   ): CipherPack[cipherType, mode] =
+    mixin ks
     maybeSafePointerOpenArray(key, keySize)
     reuseCipher(pack, mode, ks, nil)
 
